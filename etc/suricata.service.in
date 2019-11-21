@@ -11,6 +11,7 @@ After=syslog.target network-online.target
 ExecStartPre=/bin/rm -f @e_rundir@suricata.pid
 ExecStart=/sbin/suricata -c @e_sysconfdir@suricata.yaml --pidfile @e_rundir@suricata.pid $OPTIONS
 ExecReload=/bin/kill -USR2 $MAINPID
+Type=notify
 
 [Install]
 WantedBy=multi-user.target

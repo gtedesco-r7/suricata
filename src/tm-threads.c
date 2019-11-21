@@ -42,6 +42,9 @@
 #include "util-profiling.h"
 #include "util-signal.h"
 #include "queue.h"
+#if HAVE_LIBSYSTEMD
+#include <systemd/sd-daemon.h>
+#endif
 
 #ifdef PROFILE_LOCKING
 __thread uint64_t mutex_lock_contention;
@@ -2143,6 +2146,9 @@ again:
 
     SCLogNotice("all %"PRIu16" packet processing threads, %"PRIu16" management "
               "threads initialized, engine started.", ppt_num, mgt_num);
+#if HAVE_LIBSYSTEMD
+    sd_notify(0, "READY=1");
+#endif
 
     return TM_ECODE_OK;
 }
