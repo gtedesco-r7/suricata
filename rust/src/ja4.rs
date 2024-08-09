@@ -25,6 +25,7 @@ use libc::c_uchar;
 use sha2::Sha256;
 #[cfg(feature = "ja4")]
 use std::cmp::min;
+use std::cell::OnceCell;
 use std::os::raw::c_char;
 use tls_parser::{TlsCipherSuiteID, TlsExtensionType, TlsVersion};
 #[cfg(feature = "ja4")]
@@ -32,6 +33,7 @@ use crate::jsonbuilder::HEX;
 
 #[derive(Debug, PartialEq)]
 pub struct JA4 {
+    result: OnceCell<String>,
     tls_version: Option<TlsVersion>,
     ciphersuites: Vec<TlsCipherSuiteID>,
     extensions: Vec<TlsExtensionType>,
@@ -56,6 +58,7 @@ impl Default for JA4 {
 impl JA4 {
     pub fn new() -> Self {
         Self {
+            result: OnceCell::new(),
             tls_version: None,
             // Vec::new() does not allocate memory until filled, which we
             // will not do here.
@@ -74,8 +77,8 @@ impl JA4 {
     pub fn add_cipher_suite(&mut self, _cipher: TlsCipherSuiteID) {}
     pub fn add_extension(&mut self, _ext: TlsExtensionType) {}
     pub fn add_signature_algorithm(&mut self, _sigalgo: u16) {}
-    pub fn get_hash(&self) -> String {
-        String::new()
+    pub fn get_hash(&self) -> &str {
+        ""
     }
 }
 
@@ -106,6 +109,7 @@ impl JA4 {
 
     pub fn new() -> Self {
         Self {
+            result: OnceCell::new(),
             tls_version: None,
             ciphersuites: Vec::with_capacity(20),
             extensions: Vec::with_capacity(20),
@@ -117,7 +121,13 @@ impl JA4 {
         }
     }
 
+    #[inline(always)]
+    fn dirty(&mut self) {
+        self.result = OnceCell::new();
+    }
+
     pub fn set_quic(&mut self) {
+        self.dirty();
         self.quic = true;
     }
 
@@ -128,10 +138,12 @@ impl JA4 {
         // Track maximum of seen TLS versions
         match self.tls_version {
             None => {
+                self.dirty();
                 self.tls_version = Some(version);
             }
             Some(cur_version) => {
                 if u16::from(version) > u16::from(cur_version) {
+                    self.dirty();
                     self.tls_version = Some(version);
                 }
             }
@@ -150,10 +162,12 @@ impl JA4 {
             }
             if !alpn[0].is_ascii_alphanumeric() || !alpn[alpn.len() - 1].is_ascii_alphanumeric() {
                 // If the first or last byte of the first ALPN is non-alphanumeric (meaning not 0x30-0x39, 0x41-0x5A, or 0x61-0x7A), then we print the first and last characters of the hex representation of the first ALPN instead.
+                self.dirty();
                 self.alpn[0] = char::from(HEX[(alpn[0] >> 4) as usize]);
                 self.alpn[1] = char::from(HEX[(alpn[alpn.len() - 1] & 0xF) as usize]);
                 return
             }
+            self.dirty();
             self.alpn[0] = char::from(alpn[0]);
             self.alpn[1] = char::from(alpn[alpn.len() - 1]);
         }
@@ -163,6 +177,7 @@ impl JA4 {
         if JA4::is_grease(u16::from(cipher)) {
             return;
         }
+        self.dirty();
         self.ciphersuites.push(cipher);
     }
 
@@ -170,6 +185,7 @@ impl JA4 {
         if JA4::is_grease(u16::from(ext)) {
             return;
         }
+        self.dirty();
         if ext != TlsExtensionType::ApplicationLayerProtocolNegotiation
             && ext != TlsExtensionType::ServerName
         {
@@ -184,10 +200,11 @@ impl JA4 {
         if JA4::is_grease(sigalgo) {
             return;
         }
+        self.dirty();
         self.signature_algorithms.push(sigalgo);
     }
 
-    pub fn get_hash(&self) -> String {
+    fn calc_hash(&self) -> String {
         // Calculate JA4_a
         let ja4_a = format!(
             "{proto}{version}{sni}{nof_c:02}{nof_e:02}{al1}{al2}",
@@ -233,6 +250,10 @@ impl JA4 {
         ja4_c.truncate(12);
 
         return format!("{}_{}_{}", ja4_a, ja4_b, ja4_c);
+    }
+
+    pub fn get_hash(&self) -> &str {
+        self.result.get_or_init(|| self.calc_hash())
     }
 }
 
@@ -322,8 +343,7 @@ mod tests {
             j.add_extension(TlsExtensionType(i));
         }
 
-        let mut s = j.get_hash();
-        s.truncate(10);
+        let s = &j.get_hash()[..10];
         assert_eq!(s, "t00i999900");
     }
 
@@ -332,39 +352,32 @@ mod tests {
         let mut j = JA4::new();
 
         j.set_alpn("b".as_bytes());
-        let mut s = j.get_hash();
-        s.truncate(10);
+        let s = &j.get_hash()[..10];
         assert_eq!(s, "t00i0000bb");
 
         j.set_alpn("h2".as_bytes());
-        let mut s = j.get_hash();
-        s.truncate(10);
+        let s = &j.get_hash()[..10];
         assert_eq!(s, "t00i0000h2");
 
         // from https://github.com/FoxIO-LLC/ja4/blob/main/technical_details/JA4.md#alpn-extension-value
         j.set_alpn(&[0xab]);
-        let mut s = j.get_hash();
-        s.truncate(10);
+        let s = &j.get_hash()[..10];
         assert_eq!(s, "t00i0000ab");
 
         j.set_alpn(&[0xab, 0xcd]);
-        let mut s = j.get_hash();
-        s.truncate(10);
+        let s = &j.get_hash()[..10];
         assert_eq!(s, "t00i0000ad");
 
         j.set_alpn(&[0x30, 0xab]);
-        let mut s = j.get_hash();
-        s.truncate(10);
+        let s = &j.get_hash()[..10];
         assert_eq!(s, "t00i00003b");
 
         j.set_alpn(&[0x30, 0x31, 0xab, 0xcd]);
-        let mut s = j.get_hash();
-        s.truncate(10);
+        let s = &j.get_hash()[..10];
         assert_eq!(s, "t00i00003d");
 
         j.set_alpn(&[0x30, 0xab, 0xcd, 0x31]);
-        let mut s = j.get_hash();
-        s.truncate(10);
+        let s = &j.get_hash()[..10];
         assert_eq!(s, "t00i000001");
     }
 
