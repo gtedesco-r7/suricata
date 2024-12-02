@@ -99,6 +99,7 @@ pub mod detect;
 pub mod utils;
 
 pub mod ja4;
+pub mod ja4s;
 
 pub mod lua;
 

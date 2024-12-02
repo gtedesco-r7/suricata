@@ -246,9 +246,13 @@ static void JsonTlsLogSCJA4(JsonBuilder *js, SSLState *ssl_state)
 {
     if (ssl_state->client_connp.ja4 != NULL) {
         uint8_t buffer[JA4_HEX_LEN];
-        /* JA4 hash has 36 characters */
         SCJA4GetHash(ssl_state->client_connp.ja4, (uint8_t(*)[JA4_HEX_LEN])buffer);
-        jb_set_string_from_bytes(js, "ja4", buffer, 36);
+        jb_set_string_from_bytes(js, "ja4", buffer, sizeof(buffer));
+    }
+    if (ssl_state->server_connp.ja4s != NULL) {
+        uint8_t buffer[JA4S_HEX_LEN];
+        SCJA4GetHash(ssl_state->server_connp.ja4s, (uint8_t(*)[JA4S_HEX_LEN])buffer);
+        jb_set_string_from_bytes(js, "ja4s", buffer, sizeof(buffer));
     }
 }
 
