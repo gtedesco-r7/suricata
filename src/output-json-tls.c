@@ -59,6 +59,7 @@
 #define LOG_TLS_FIELD_CLIENT_ALPNS    BIT_U64(18)
 #define LOG_TLS_FIELD_SERVER_ALPNS    BIT_U64(19)
 #define LOG_TLS_FIELD_CLIENT_HELLO    BIT_U64(20)
+#define LOG_TLS_FIELD_SERVER_HELLO    BIT_U64(21)
 
 typedef struct {
     const char *name;
@@ -88,6 +89,7 @@ TlsFields tls_fields[] = {
     { "client_alpns", LOG_TLS_FIELD_CLIENT_ALPNS },
     { "server_alpns", LOG_TLS_FIELD_SERVER_ALPNS },
     { "client_hello", LOG_TLS_FIELD_CLIENT_HELLO },
+    { "server_hello", LOG_TLS_FIELD_SERVER_HELLO },
     { NULL, -1 },
     // clang-format on
 };
@@ -253,7 +255,7 @@ static void JsonTlsLogSCJA4(JsonBuilder *js, SSLState *ssl_state)
     }
     if (ssl_state->server_connp.ja4s != NULL) {
         uint8_t buffer[JA4S_HEX_LEN];
-        SCJA4GetHash(ssl_state->server_connp.ja4s, (uint8_t(*)[JA4S_HEX_LEN])buffer);
+        SCJA4SGetHash(ssl_state->server_connp.ja4s, (uint8_t(*)[JA4S_HEX_LEN])buffer);
         jb_set_string_from_bytes(js, "ja4s", buffer, sizeof(buffer));
     }
 }
@@ -334,6 +336,29 @@ static void JsonTlsLogClientHello(JsonBuilder *js, SSLState *ssl_state)
 
     val = SCJA4GetSigAlgs(ssl_state->client_connp.ja4, &nr);
     jb_open_array(js, "sig_algs");
+    for (i = 0; i < nr; i++) {
+        jb_append_uint(js, val[i]);
+    }
+    jb_close(js);
+
+    jb_close(js);
+}
+
+static void JsonTlsLogServerHello(JsonBuilder *js, SSLState *ssl_state)
+{
+    const uint16_t *val;
+    uintptr_t i, nr;
+
+    if (ssl_state->server_connp.ja4s == NULL) {
+        return;
+    }
+
+    jb_open_object(js, "server");
+
+    jb_set_uint(js, "cipher", SCJA4SGetCipherSuite(ssl_state->server_connp.ja4s));
+
+    val = SCJA4SGetExtensions(ssl_state->server_connp.ja4s, &nr);
+    jb_open_array(js, "exts");
     for (i = 0; i < nr; i++) {
         jb_append_uint(js, val[i]);
     }
@@ -497,6 +522,10 @@ static void JsonTlsLogFields(JsonBuilder *js, SSLState *ssl_state, uint64_t fiel
 
     if (fields & LOG_TLS_FIELD_CLIENT_HELLO) {
         JsonTlsLogClientHello(js, ssl_state);
+    }
+
+    if (fields & LOG_TLS_FIELD_SERVER_HELLO) {
+        JsonTlsLogServerHello(js, ssl_state);
     }
 }
 
